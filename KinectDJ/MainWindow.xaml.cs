@@ -73,7 +73,7 @@ namespace KinectDJ
 			var connectedSensors=(from s in KinectSensor.KinectSensors
 								  where s.Status==KinectStatus.Connected select s).ToArray();
 			if(connectedSensors.Length==0){
-				MessageBox.Show("Kinect is not ready!","KinectTestApp",MessageBoxButton.OK,MessageBoxImage.Error);
+				MessageBox.Show("Kinect is not ready!","KinectDJ",MessageBoxButton.OK,MessageBoxImage.Error);
 				Close();
 				return;
 			}
@@ -104,7 +104,7 @@ namespace KinectDJ
 			try{
 				sensor.Start();
 			}catch(IOException){
-				MessageBox.Show("Error detected!","KinectTestApp",MessageBoxButton.OK,MessageBoxImage.Error);
+				MessageBox.Show("Error detected!","KinectDJ",MessageBoxButton.OK,MessageBoxImage.Error);
 				Close();
 			}
 			return;
@@ -261,8 +261,7 @@ namespace KinectDJ
 				effectInst.AllParameters=settings[i];
 			}
 			var name=new FileInfo(fileName).Name;
-			var bpm=int.Parse(name.Substring(0,name.IndexOf('-')));
-			timer.Interval=new TimeSpan((long)(1.0/(bpm/60.0)*1250000.0));
+			timer.Interval=new TimeSpan((long)(1.0/(AnalyzeBPM(fileName)/60.0)*1250000.0));
 			//MessageBox.Show(timer.Interval.Ticks.ToString());
 			return;
 		}
@@ -289,6 +288,59 @@ namespace KinectDJ
 				secondBuffer.Volume=prevvolume;
 			}
 			return;
+		}
+
+		double HannWindow(int i,int size)
+		{
+			return 0.5-0.5*Math.Cos(2.0*Math.PI*i/size);
+		}
+
+		int[] FindPeak(double[] graph,int count)
+		{
+			var obj=from i in Enumerable.Range(0,graph.Length-1)
+					select new{Diff=graph[i+1]-graph[i],Prev=i==0?0:graph[i]-graph[i-1],GraphValue=graph[i],Index=i};
+			var indices=from o in obj
+						where o.Diff<=0&&o.Prev>0
+						orderby o.GraphValue descending
+						select o.Index;
+			return indices.Take(count).ToArray();
+		}
+
+		int AnalyzeBPM(string fileName)
+		{
+			var waveFile=new WaveFile(fileName);
+			
+			const int frameSize=1024;
+			var frameCount=(double)waveFile.FormatChunk.SamplesPerSecond/frameSize;
+			var dataLength=waveFile.Data.Length;
+			var sampleCount=dataLength/frameSize/2;
+			var data=waveFile.Data.ToList();
+			var volume=(from index in Enumerable.Range(0,sampleCount)
+						let sum=data.GetRange(frameSize*index,frameSize).Sum(d=>(double)d*d)
+						select Math.Sqrt(sum/frameSize)).ToArray();
+
+			waveFile.Dispose();
+
+			var prev=0.0;
+			var diff=(from v in volume let temp=prev select Math.Max((prev=v)-temp,0.0)).ToArray();
+			
+			var a=new double[240-60+1];
+			var b=new double[a.Length];
+			var r=new double[a.Length];
+			for(int i=0;i<a.Length;i++){
+				double sum1=0,sum2=0,freq=(i+60)/60.0;
+				var theta=2.0*Math.PI*freq/frameCount;
+				for(int n=0;n<diff.Length;n++){
+					var window=HannWindow(n,diff.Length);
+					sum1+=diff[n]*Math.Cos(theta*n)*window;
+					sum2+=diff[n]*Math.Sin(theta*n)*window;
+				}
+				a[i]=sum1/sampleCount;
+				b[i]=sum2/sampleCount;
+				r[i]=Math.Sqrt(a[i]*a[i]+b[i]*b[i]);
+			}
+
+			return FindPeak(r,1).First();
 		}
 	}
 }
