@@ -132,7 +132,7 @@ namespace KinectDJ
 									if(skel.TrackingState==SkeletonTrackingState.Tracked){
 										foreach(Joint joint in skel.Joints){
 											if(joint.TrackingState==JointTrackingState.Tracked){
-												var depthPoint=sensor.MapSkeletonPointToDepth(joint.Position,DepthImageFormat.Resolution640x480Fps30);
+												var depthPoint=sensor.CoordinateMapper.MapSkeletonPointToDepthPoint(joint.Position,DepthImageFormat.Resolution640x480Fps30);
 												drawingContext.DrawEllipse(Brushes.Green,null,new Point(depthPoint.X,depthPoint.Y),10,10);
 											}
 										}
@@ -324,21 +324,13 @@ namespace KinectDJ
 			var prev=0.0;
 			var diff=(from v in volume let temp=prev select Math.Max((prev=v)-temp,0.0)).ToArray();
 			
-			var a=new double[240-60+1];
-			var b=new double[a.Length];
-			var r=new double[a.Length];
-			for(int i=0;i<a.Length;i++){
-				double sum1=0,sum2=0,freq=(i+60)/60.0;
-				var theta=2.0*Math.PI*freq/frameCount;
-				for(int n=0;n<diff.Length;n++){
-					var window=HannWindow(n,diff.Length);
-					sum1+=diff[n]*Math.Cos(theta*n)*window;
-					sum2+=diff[n]*Math.Sin(theta*n)*window;
-				}
-				a[i]=sum1/sampleCount;
-				b[i]=sum2/sampleCount;
-				r[i]=Math.Sqrt(a[i]*a[i]+b[i]*b[i]);
-			}
+			var indices=Enumerable.Range(0,diff.Length).AsParallel();
+			var r=(from i in Enumerable.Range(0,181)
+				   let freq=(i+60)/60.0
+				   let theta=2.0*Math.PI*freq/frameCount
+				   let cosSum=indices.Sum(index=>HannWindow(index,diff.Length)*Math.Cos(theta*index)*diff[index])/sampleCount
+				   let sinSum=indices.Sum(index=>HannWindow(index,diff.Length)*Math.Sin(theta*index)*diff[index])/sampleCount
+				   select Math.Sqrt(cosSum*cosSum+sinSum*sinSum)).ToArray();
 
 			return FindPeak(r,1).First();
 		}
